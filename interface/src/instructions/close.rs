@@ -1,7 +1,9 @@
+use static_assertions::const_assert_eq;
+
 use crate::{
     error::DropsetError,
     pack::{write_bytes, Pack},
-    state::{sector::NonNilSectorIndex, U32_SIZE},
+    state::{sector::NonNilSectorIndex, transmutable::Transmutable, U32_SIZE},
 };
 use core::mem::MaybeUninit;
 
@@ -29,3 +31,21 @@ impl Pack<8> for CloseInstructionData {
         write_bytes(&mut dst[0..8], &self.sector_index_hint);
     }
 }
+
+// Safety:
+//
+// - Stable layout with `#[repr(C)]`.
+// - `size_of` and `align_of` are checked below.
+// - All bit patterns are valid.
+unsafe impl Transmutable for CloseInstructionData {
+    const LEN: usize = 4;
+
+    #[inline(always)]
+    fn validate_bit_patterns(_bytes: &[u8]) -> crate::error::DropsetResult {
+        // All bit patterns are valid: no enums, bools, or other types with invalid states.
+        Ok(())
+    }
+}
+
+const_assert_eq!(CloseInstructionData::LEN, size_of::<CloseInstructionData>());
+const_assert_eq!(1, align_of::<CloseInstructionData>());
