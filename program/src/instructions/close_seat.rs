@@ -18,7 +18,7 @@ use crate::{
     },
     events::EventBuffer,
     market_signer,
-    shared::market_operations::find_seat_with_hint,
+    shared::seat_operations::find_seat_with_hint,
 };
 
 /// Instruction handler logic for closing an existing market seat and reclaiming associated funds.
@@ -57,7 +57,7 @@ pub fn process_close_seat<'a>(
         ctx.market_account
             // Safety: Scoped mutable borrow of market account data to remove the seat.
             .load_unchecked_mut()
-            .seat_list()
+            .seats()
             // Safety: The index hint was verified as in-bounds.
             .remove_at(sector_index_hint)
     };

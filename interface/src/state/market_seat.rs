@@ -3,14 +3,21 @@
 use pinocchio::pubkey::Pubkey;
 use static_assertions::const_assert_eq;
 
-use crate::state::{
-    node::{
-        NodePayload,
-        NODE_PAYLOAD_SIZE,
+use crate::{
+    error::{
+        DropsetError,
+        DropsetResult,
     },
-    transmutable::Transmutable,
-    user_order_sectors::UserOrderSectors,
-    U64_SIZE,
+    state::{
+        node::{
+            AllBitPatternsValid,
+            NodePayload,
+            NODE_PAYLOAD_SIZE,
+        },
+        transmutable::Transmutable,
+        user_order_sectors::UserOrderSectors,
+        U64_SIZE,
+    },
 };
 
 /// Represents a user's position within a market.
@@ -20,14 +27,12 @@ pub struct MarketSeat {
     /// The user's public key.
     pub user: Pubkey,
     /// The u64 amount of base the maker can withdraw as LE bytes.
-    /// Updated on place, cancel, deposit, withdraw.
     base_available: [u8; U64_SIZE],
     /// The u64 amount of quote the maker can withdraw as LE bytes.
-    /// Updated on place, cancel, deposit, withdraw.
     quote_available: [u8; U64_SIZE],
     /// The mapping for a user's order prices to order sector indices.
     /// This facilitates O(1) indexing from a user's seat -> their orders.
-    user_order_sectors: UserOrderSectors,
+    pub user_order_sectors: UserOrderSectors,
 }
 
 impl MarketSeat {
@@ -61,11 +66,59 @@ impl MarketSeat {
     }
 
     #[inline(always)]
-    pub fn as_array(&self) -> &[u8; MarketSeat::LEN] {
-        // Safety:
-        // - `MarketSeat` is always `LEN` bytes; size and alignment are checked with const asserts.
-        // - All fields are byte-safe, `Copy`, non-pointer/reference u8 arrays.
-        unsafe { &*(self as *const Self as *const [u8; MarketSeat::LEN]) }
+    pub fn try_decrement_base_available(&mut self, amount: u64) -> DropsetResult {
+        let remaining = price::checked_sub!(
+            self.base_available(),
+            amount,
+            DropsetError::InsufficientUserBalance
+        )?;
+        self.set_base_available(remaining);
+
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub fn try_decrement_quote_available(&mut self, amount: u64) -> DropsetResult {
+        let remaining = price::checked_sub!(
+            self.quote_available(),
+            amount,
+            DropsetError::InsufficientUserBalance
+        )?;
+        self.set_quote_available(remaining);
+
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub fn try_increment_base_available(&mut self, amount: u64) -> DropsetResult {
+        let new_amount = self.base_available().checked_add(amount).ok_or_else(|| {
+            pinocchio::hint::cold_path();
+            DropsetError::ArithmeticOverflow
+        })?;
+        self.set_base_available(new_amount);
+
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub fn try_increment_quote_available(&mut self, amount: u64) -> DropsetResult {
+        let new_amount = self.quote_available().checked_add(amount).ok_or_else(|| {
+            pinocchio::hint::cold_path();
+            DropsetError::ArithmeticOverflow
+        })?;
+        self.set_quote_available(new_amount);
+
+        Ok(())
+    }
+
+    /// This method is sound because:
+    ///
+    /// - `Self` is exactly `Self::LEN` bytes.
+    /// - Size and alignment are verified with const assertions.
+    /// - All fields are byte-safe, `Copy`, non-pointer/reference u8 arrays.
+    #[inline(always)]
+    pub fn as_bytes(&self) -> &[u8; Self::LEN] {
+        unsafe { &*(self as *const Self as *const [u8; Self::LEN]) }
     }
 }
 
@@ -89,3 +142,6 @@ const_assert_eq!(align_of::<MarketSeat>(), 1);
 
 // Safety: Const asserts ensure size_of::<MarketSeat>() == NODE_PAYLOAD_SIZE.
 unsafe impl NodePayload for MarketSeat {}
+
+// Safety: All bit patterns are valid.
+unsafe impl AllBitPatternsValid for MarketSeat {}

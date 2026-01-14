@@ -4,15 +4,19 @@
 //! on-chain logic for each supported operation.
 
 pub mod batch;
+pub mod cancel_order;
 pub mod close_seat;
 pub mod deposit;
 pub mod flush_events;
+pub mod post_order;
 pub mod register_market;
 pub mod withdraw;
 
 pub use batch::process_batch;
+pub use cancel_order::process_cancel_order;
 pub use close_seat::process_close_seat;
 pub use deposit::process_deposit;
 pub use flush_events::process_flush_events;
+pub use post_order::process_post_order;
 pub use register_market::process_register_market;
 pub use withdraw::process_withdraw;

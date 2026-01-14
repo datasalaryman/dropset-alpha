@@ -58,6 +58,12 @@ pub fn process_instruction(
             DropsetInstruction::CloseSeat => {
                 process_close_seat(accounts, instruction_data, event_buffer)
             }
+            DropsetInstruction::PostOrder => {
+                process_post_order(accounts, instruction_data, event_buffer)
+            }
+            DropsetInstruction::CancelOrder => {
+                process_cancel_order(accounts, instruction_data, event_buffer)
+            }
             DropsetInstruction::FlushEvents => {
                 return process_flush_events(accounts, instruction_data)
             }

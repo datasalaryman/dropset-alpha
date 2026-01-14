@@ -2,10 +2,12 @@
 //! events or contiguous instruction data.
 
 use dropset_interface::events::{
+    CancelOrderEventInstructionData,
     CloseSeatEventInstructionData,
     DepositEventInstructionData,
     DropsetEventTag,
     HeaderEventInstructionData,
+    PostOrderEventInstructionData,
     RegisterMarketEventInstructionData,
     WithdrawEventInstructionData,
 };
@@ -19,6 +21,8 @@ pub enum DropsetEvent {
     Withdraw(WithdrawEventInstructionData),
     RegisterMarket(display_types::DisplayRegisterMarketData),
     CloseSeat(CloseSeatEventInstructionData),
+    PostOrder(PostOrderEventInstructionData),
+    CancelOrder(CancelOrderEventInstructionData),
 }
 
 impl DropsetEvent {
@@ -29,6 +33,8 @@ impl DropsetEvent {
             Self::Withdraw(_) => WithdrawEventInstructionData::LEN_WITH_TAG,
             Self::RegisterMarket(_) => RegisterMarketEventInstructionData::LEN_WITH_TAG,
             Self::CloseSeat(_) => CloseSeatEventInstructionData::LEN_WITH_TAG,
+            Self::PostOrder(_) => PostOrderEventInstructionData::LEN_WITH_TAG,
+            Self::CancelOrder(_) => CancelOrderEventInstructionData::LEN_WITH_TAG,
         }
     }
 }
@@ -102,6 +108,12 @@ impl DropsetEvent {
             )),
             DropsetEventTag::CloseSeatEvent => Ok(DropsetEvent::CloseSeat(
                 CloseSeatEventInstructionData::unpack_client(data).map_err(|_| err())?,
+            )),
+            DropsetEventTag::PostOrderEvent => Ok(DropsetEvent::PostOrder(
+                PostOrderEventInstructionData::unpack_client(data).map_err(|_| err())?,
+            )),
+            DropsetEventTag::CancelOrderEvent => Ok(DropsetEvent::CancelOrder(
+                CancelOrderEventInstructionData::unpack_client(data).map_err(|_| err())?,
             )),
         }
     }

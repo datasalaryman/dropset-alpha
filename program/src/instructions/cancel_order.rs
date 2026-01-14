@@ -1,0 +1,119 @@
+//! See [`process_cancel_order`].
+
+#[cfg(feature = "debug")]
+use dropset_interface::events::CancelOrderEventInstructionData;
+use dropset_interface::{
+    instructions::CancelOrderInstructionData,
+    state::{
+        market_seat::MarketSeat,
+        node::Node,
+        sector::SectorIndex,
+    },
+};
+use pinocchio::{
+    account_info::AccountInfo,
+    program_error::ProgramError,
+};
+
+use crate::{
+    context::{
+        cancel_order_context::CancelOrderContext,
+        EventBufferContext,
+    },
+    events::EventBuffer,
+    shared::{
+        order_operations::load_order_from_sector_index,
+        seat_operations::find_mut_seat_with_hint,
+    },
+};
+
+/// Instruction handler logic for cancelling a user's bid or ask order on the market's order book.
+///
+/// # Safety
+///
+/// Caller guarantees the safety contract detailed in
+/// [`dropset_interface::instructions::generated_pinocchio::CancelOrder`].
+#[inline(never)]
+pub unsafe fn process_cancel_order<'a>(
+    accounts: &'a [AccountInfo],
+    instruction_data: &[u8],
+    _event_buffer: &mut EventBuffer,
+) -> Result<EventBufferContext<'a>, ProgramError> {
+    let CancelOrderInstructionData {
+        encoded_price,
+        is_bid,
+        user_sector_index_hint,
+    } = CancelOrderInstructionData::unpack_pinocchio(instruction_data)?;
+    let mut ctx = CancelOrderContext::load(accounts)?;
+
+    // Remove the order from the user seat's order sectors mapping.
+    let order_sector_index = {
+        // Safety: Scoped mutable borrow of the market account.
+        let market = unsafe { ctx.market_account.load_unchecked_mut() };
+        Node::check_in_bounds(market.sectors, user_sector_index_hint)?;
+        // Safety: The user sector index hint was just verified in-bounds.
+        let user_seat =
+            unsafe { find_mut_seat_with_hint(market, user_sector_index_hint, ctx.user.key()) }?;
+        if is_bid {
+            SectorIndex::from_le_bytes(user_seat.user_order_sectors.bids.remove(encoded_price)?)
+        } else {
+            SectorIndex::from_le_bytes(user_seat.user_order_sectors.asks.remove(encoded_price)?)
+        }
+    };
+
+    // Load the order given the order sector index.
+    let order = {
+        // Safety: Scoped borrow of the market account.
+        let market = unsafe { ctx.market_account.load_unchecked() };
+        // Safety: The order sector index returned from the `remove` method still points to a
+        // sector with a valid order. All order sector indices in a user seat are thus in-bounds and
+        // don't need to be explicitly verified as in-bounds.
+        debug_assert!(Node::check_in_bounds(market.sectors, order_sector_index).is_ok());
+        load_order_from_sector_index(market, order_sector_index)
+    };
+
+    // Increment the user's collateral in their market seat by the amount remaining in the order.
+    if is_bid {
+        // If the user placed a bid, they provided quote as collateral.
+        let order_size_remaining = order.quote_remaining();
+        // Safety: Scoped mutable borrow of the market account.
+        let market = unsafe { ctx.market_account.load_unchecked_mut() };
+        // Safety: The seat index hint was validated above and the user's seat hasn't changed.
+        let node = unsafe { Node::from_sector_index_mut(market.sectors, user_sector_index_hint) };
+        let user_seat = node.load_payload_mut::<MarketSeat>();
+        user_seat.try_increment_quote_available(order_size_remaining)?;
+    } else {
+        // If the user placed an ask, they provided base as collateral.
+        let order_size_remaining = order.base_remaining();
+        // Safety: Scoped mutable borrow of the market account.
+        let market = unsafe { ctx.market_account.load_unchecked_mut() };
+        // Safety: The seat index hint was validated above and the user's seat hasn't changed.
+        let node = unsafe { Node::from_sector_index_mut(market.sectors, user_sector_index_hint) };
+        let user_seat = node.load_payload_mut::<MarketSeat>();
+        user_seat.try_increment_base_available(order_size_remaining)?;
+    }
+
+    // Remove the order at the order sector index from the appropriate orders collection.
+    unsafe {
+        // Safety: Scoped mutable borrow of the market account.
+        let mut market = ctx.market_account.load_unchecked_mut();
+        // Safety: The order sector index from the `remove` method is still in-bounds.
+        if is_bid {
+            market.bids().remove_at(order_sector_index);
+        } else {
+            market.asks().remove_at(order_sector_index);
+        }
+    }
+
+    #[cfg(feature = "debug")]
+    _event_buffer.add_to_buffer(
+        CancelOrderEventInstructionData::new(is_bid, user_sector_index_hint),
+        ctx.event_authority,
+        ctx.market_account.clone(),
+    )?;
+
+    Ok(EventBufferContext {
+        event_authority: ctx.event_authority,
+        market_account: ctx.market_account,
+    })
+}

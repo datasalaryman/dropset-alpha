@@ -24,7 +24,7 @@ use crate::{
 pub const MAX_ORDERS: u8 = 5;
 
 /// The [`OrderSectors`] that maps the prices of a user's bids and asks to their corresponding
-/// sector indices in the market account data.
+/// orders' sector indices in the market account data.
 ///
 /// `bids` and `asks` both have a maximum [`MAX_ORDERS`] orders.
 #[repr(C)]
@@ -35,8 +35,9 @@ pub struct UserOrderSectors {
 }
 
 /// An array of [`MAX_ORDERS`] [`PriceToIndex`]s that maps unique prices to a sector index.
-/// By default, [`PriceToIndex`]s are free orders and map an encoded price u32 value of `0`
-/// to the [`LE_NIL`] sector index.
+///
+/// By default, each [`PriceToIndex`] represents an unused item by mapping an encoded price u32
+/// value of `0` to the [`LE_NIL`] sector index.
 #[repr(transparent)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OrderSectors([PriceToIndex; MAX_ORDERS as usize]);
@@ -72,7 +73,11 @@ impl OrderSectors {
     /// The `sector_index` passed to this method should be non-NIL or the node after mutation will
     /// continue to be treated as a free node.
     #[inline(always)]
-    pub fn add(&mut self, new_price: &LeEncodedPrice, new_index: &LeSectorIndex) -> DropsetResult {
+    pub fn add(
+        &mut self,
+        new_price: &LeEncodedPrice,
+        order_index: &LeSectorIndex,
+    ) -> DropsetResult {
         // Check if the price already exists in a node and fail early if it does.
         if self
             .iter()
@@ -87,7 +92,7 @@ impl OrderSectors {
             .ok_or(DropsetError::UserHasMaxOrders)?;
 
         node.encoded_price = *new_price;
-        node.sector_index = *new_index;
+        node.sector_index = *order_index;
 
         Ok(())
     }
@@ -95,18 +100,25 @@ impl OrderSectors {
     /// Fallibly remove a [`PriceToIndex`] from a user's orders.
     ///
     /// Fails if the user does not have an order corresponding to the passed encoded price.
+    ///
+    /// Note that the encoded price does not have to be validated since it's doing a simple match
+    /// on equality and isn't stored anywhere.
+    ///
+    /// Returns the mapped order's sector index.
     #[inline(always)]
-    pub fn remove(&mut self, price_to_remove: &LeEncodedPrice) -> DropsetResult {
+    pub fn remove(&mut self, encoded_price: u32) -> Result<LeSectorIndex, DropsetError> {
         let node = self
             .0
             .iter_mut()
-            .find(|node| node.encoded_price.as_slice() == price_to_remove.as_slice())
+            .find(|node| node.encoded_price.as_slice() == &encoded_price.to_le_bytes())
             .ok_or(DropsetError::OrderNotFound)?;
+
+        let sector_index = node.sector_index;
 
         node.encoded_price = LeEncodedPrice::zero();
         node.sector_index = LE_NIL;
 
-        Ok(())
+        Ok(sector_index)
     }
 
     #[inline(always)]
@@ -125,7 +137,7 @@ impl OrderSectors {
 /// If the sector index equals [`LE_NIL`], it's considered a freed node, otherwise, it contains an
 /// existing, valid pair of encoded price to sector index.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct PriceToIndex {
     pub encoded_price: LeEncodedPrice,
     pub sector_index: LeSectorIndex,
@@ -210,6 +222,33 @@ unsafe impl Transmutable for PriceToIndex {
 const_assert_eq!(PriceToIndex::LEN, size_of::<PriceToIndex>());
 const_assert_eq!(align_of::<PriceToIndex>(), 1);
 
+// -------------------------------------------------------------------------------------------------
+// Create readable debug views for the encoded price to order sector mapping.
+#[allow(dead_code)]
+#[derive(Debug)]
+struct PriceToIndexView {
+    pub encoded_price: u32,
+    pub sector_index: SectorIndex,
+}
+
+impl From<&PriceToIndex> for PriceToIndexView {
+    fn from(value: &PriceToIndex) -> Self {
+        Self {
+            encoded_price: u32::from_le_bytes(value.encoded_price.as_array()),
+            sector_index: SectorIndex::from_le_bytes(value.sector_index),
+        }
+    }
+}
+
+impl core::fmt::Debug for PriceToIndex {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let is_in_use = !self.is_free();
+        let node: Option<PriceToIndexView> = is_in_use.then(|| self.into());
+        write!(f, "{:#?}", node)
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
     use price::{
@@ -345,7 +384,7 @@ mod tests {
             to_biased_exponent!(1),
             ValidatedPriceMantissa::try_from(12_345_678).unwrap(),
         );
-        let failed_remove = order_sectors.bids.remove(&bid_encoded_price.into());
+        let failed_remove = order_sectors.bids.remove(bid_encoded_price.as_u32());
         assert!(matches!(failed_remove, Err(DropsetError::OrderNotFound)));
     }
 
@@ -373,7 +412,10 @@ mod tests {
             });
         assert_eq!(num_orders_in_use, 1);
 
-        assert!(order_sectors.bids.remove(&bid_encoded_price.into()).is_ok());
+        assert!(order_sectors
+            .bids
+            .remove(bid_encoded_price.as_u32())
+            .is_ok());
         assert!(order_sectors.bids.iter().all(|bid| bid.is_free()));
     }
 
@@ -415,7 +457,7 @@ mod tests {
     }
 
     #[test]
-    fn replace_arbitrary_order() {
+    fn repost_arbitrary_order() {
         let mut order_sectors = UserOrderSectors::default();
         let index_and_mantissa_pairs: [(u32, ValidatedPriceMantissa); MAX_ORDERS as usize] = [
             (1, ValidatedPriceMantissa::try_from(11_111_111).unwrap()),
@@ -460,7 +502,7 @@ mod tests {
         assert_ne!(old_sector_index, new_sector_index);
 
         // Remove the old price.
-        assert!(order_sectors.bids.remove(&old_price.into()).is_ok());
+        assert!(order_sectors.bids.remove(old_price.as_u32()).is_ok());
 
         // Add the new price.
         assert!(order_sectors

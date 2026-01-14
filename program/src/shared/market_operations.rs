@@ -1,112 +1,18 @@
-//! Core reusable logic for manipulating market data structures, including inserting, removing, and
-//! traversing market seats.
+//! General operations on market account data.
 
 use dropset_interface::{
     error::DropsetError,
     state::{
         market::{
             Market,
-            MarketRef,
             MarketRefMut,
         },
         market_header::MarketHeader,
-        market_seat::MarketSeat,
-        node::Node,
-        seats_dll::SeatsLinkedList,
-        sector::{
-            SectorIndex,
-            NIL,
-            SECTOR_SIZE,
-        },
+        sector::SECTOR_SIZE,
         transmutable::Transmutable,
     },
 };
-use pinocchio::pubkey::{
-    pubkey_eq,
-    Pubkey,
-};
-
-pub fn insert_market_seat(
-    list: &mut SeatsLinkedList,
-    seat: MarketSeat,
-) -> Result<SectorIndex, DropsetError> {
-    let (prev_index, insert_before_index) = find_insert_before_index(list, &seat.user);
-    let seat_bytes = seat.as_array();
-
-    // Return an error early if the user already exists in the seat list at the previous index.
-    if prev_index != NIL {
-        // Safety: `prev_index` is non-NIL and was returned by an iterator, so it must be in-bounds.
-        let prev_node = unsafe { Node::from_sector_index(list.sectors, prev_index) };
-        let prev_seat = prev_node.load_payload::<MarketSeat>();
-        if pubkey_eq(&seat.user, &prev_seat.user) {
-            return Err(DropsetError::UserAlreadyExists);
-        }
-    }
-
-    if insert_before_index == list.header.seats_dll_head() {
-        list.push_front(seat_bytes)
-    } else if insert_before_index == NIL {
-        list.push_back(seat_bytes)
-    } else {
-        // Safety: `index` was returned by the iterator so it must be in-bounds.
-        unsafe { list.insert_before(insert_before_index, seat_bytes) }
-    }
-}
-
-/// Returns the index a node should be inserted before and the `prev_index` relative to the index
-/// to be inserted at as:
-///
-/// (prev_index, insert_before_index)
-fn find_insert_before_index(list: &SeatsLinkedList, user: &Pubkey) -> (SectorIndex, SectorIndex) {
-    for (index, node) in list.iter() {
-        let seat = node.load_payload::<MarketSeat>();
-        if user < &seat.user {
-            return (node.prev(), index);
-        }
-    }
-    // The `prev` index at the end of the list is the tail.
-    (list.header.seats_dll_tail(), NIL)
-}
-
-/// Tries to find a market seat given an index hint.
-///
-/// # Safety
-///
-/// Caller guarantees `hint` is in-bounds of `market.sectors` bytes.
-pub unsafe fn find_seat_with_hint<'a>(
-    market: MarketRef<'a>,
-    hint: SectorIndex,
-    user: &Pubkey,
-) -> Result<&'a MarketSeat, DropsetError> {
-    // Safety: Caller guarantees `hint` is in-bounds.
-    let node = unsafe { Node::from_sector_index(market.sectors, hint) };
-    let seat = node.load_payload::<MarketSeat>();
-    if pubkey_eq(user, &seat.user) {
-        Ok(seat)
-    } else {
-        Err(DropsetError::InvalidIndexHint)
-    }
-}
-
-/// Tries to find a mutable market seat given an index hint.
-///
-/// # Safety
-///
-/// Caller guarantees `hint` is in-bounds of `market.sectors` bytes.
-pub unsafe fn find_mut_seat_with_hint<'a>(
-    market: MarketRefMut<'a>,
-    hint: SectorIndex,
-    user: &Pubkey,
-) -> Result<&'a mut MarketSeat, DropsetError> {
-    // Safety: Caller guarantees `hint` is in-bounds.
-    let node = unsafe { Node::from_sector_index_mut(market.sectors, hint) };
-    let seat = node.load_payload_mut::<MarketSeat>();
-    if pubkey_eq(user, &seat.user) {
-        Ok(seat)
-    } else {
-        Err(DropsetError::InvalidIndexHint)
-    }
-}
+use pinocchio::pubkey::Pubkey;
 
 /// Initializes a freshly created market account. This function skips checks based on the assumption
 /// that the market has just been created on-chain.
@@ -160,12 +66,16 @@ pub fn initialize_market_account_data<'a>(
 pub mod tests {
     use dropset_interface::state::{
         market_seat::MarketSeat,
-        sector::SECTOR_SIZE,
+        sector::{
+            SectorIndex,
+            SECTOR_SIZE,
+        },
         transmutable::Transmutable,
     };
     use pinocchio_pubkey::pubkey;
 
     use super::initialize_market_account_data;
+    use crate::shared::seat_operations::try_insert_market_seat;
 
     extern crate std;
     use std::{
@@ -187,7 +97,7 @@ pub mod tests {
         )
         .expect("Should initialize market data");
 
-        let mut seat_list = market.seat_list();
+        let mut seat_list = market.seats();
 
         let [zero, one, two, three, ten, forty] = vec![
             [vec![0; 31], vec![0]].concat().try_into().unwrap(),
@@ -214,7 +124,7 @@ pub mod tests {
         ];
 
         seats.clone().into_iter().for_each(|seat| {
-            assert!(insert_market_seat(&mut seat_list, seat).is_ok());
+            assert!(try_insert_market_seat(&mut seat_list, seat).is_ok());
         });
 
         let resulting_seat_list: Vec<(SectorIndex, &MarketSeat)> = seat_list

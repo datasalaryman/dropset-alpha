@@ -50,7 +50,7 @@ pub enum DropsetInstruction {
     #[args(sector_index_hint: u32, "A hint indicating which sector the user's seat resides in (pass `NIL` when registering a new seat).")]
     Deposit,
 
-    #[account(0,   name = "event_authority",     desc = "The event authority PDA signer.")]
+    #[account(0,           name = "event_authority",     desc = "The event authority PDA signer.")]
     #[account(1, signer, writable, name = "user",        desc = "The user registering the market.")]
     #[account(2, writable, name = "market_account",      desc = "The market account PDA.")]
     #[account(3, writable, name = "base_market_ata",     desc = "The market's associated token account for the base mint.")]
@@ -76,6 +76,27 @@ pub enum DropsetInstruction {
     #[args(amount: u64, "The amount to withdraw.")]
     #[args(sector_index_hint: u32, "A hint indicating which sector the user's seat resides in.")]
     Withdraw,
+
+    #[account(0,           name = "event_authority", desc = "The event authority PDA signer.")]
+    #[account(1, signer,   name = "user",            desc = "The user posting an order.")]
+    #[account(2, writable, name = "market_account",  desc = "The market account PDA.")]
+    #[account(3,           name = "dropset_program", desc = "The dropset program itself, used for the self-CPI.")]
+    #[args(price_mantissa: u32, "The price mantissa.")]
+    #[args(base_scalar: u64, "The scalar for the base token.")]
+    #[args(base_exponent_biased: u8, "The biased base exponent.")]
+    #[args(quote_exponent_biased: u8, "The biased quote exponent.")]
+    #[args(is_bid: bool, "Whether or not the order is a bid. If false, the order is an ask.")]
+    #[args(user_sector_index_hint: u32, "A hint indicating which sector the user's seat resides in.")]
+    PostOrder,
+
+    #[account(0,           name = "event_authority", desc = "The event authority PDA signer.")]
+    #[account(1, signer,   name = "user",            desc = "The user canceling an order.")]
+    #[account(2, writable, name = "market_account",  desc = "The market account PDA.")]
+    #[account(3,           name = "dropset_program", desc = "The dropset program itself, used for the self-CPI.")]
+    #[args(encoded_price: u32, "The encoded price for the order to cancel.")]
+    #[args(is_bid: bool, "Whether or not the order is a bid. If false, the order is an ask.")]
+    #[args(user_sector_index_hint: u32, "A hint indicating which sector the user's seat resides in.")]
+    CancelOrder,
 
     // FlushEvents is an internal instruction and can only be called by the program. It does have
     // instruction data, but it is not used by the program.
