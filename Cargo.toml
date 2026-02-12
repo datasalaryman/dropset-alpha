@@ -36,7 +36,6 @@ mollusk-svm = "0.10.0"
 paste = { version = "1.0" }
 pinocchio = { version = "0.10.1" }
 pinocchio-associated-token-account = { version = "0.3.0" }
-pinocchio-log = { version = "0.5.1" }
 pinocchio-system = { version = "0.5.0" }
 pinocchio-token = { version = "0.5.0" }
 pinocchio-token-2022 = { version = "0.2.0" }
@@ -60,6 +59,7 @@ solana-msg = "3.0.0"
 solana-sdk = "3.0.0"
 solana-system-interface = "3.0.0"
 solana-program-error = { version = "3.0.0" }
+solana-program-log = { version = "1.1.0" }
 solana-pubkey = { version = "4.0.0", features = ["curve25519"] }
 solana-transaction-error = "3.0.0"
 solana-transaction-status = "3.1.6"
@@ -93,4 +93,5 @@ check-cfg = [
     'cfg(feature, values("std"))',
     'cfg(feature, values("program"))',
     'cfg(feature, values("client"))',
+    'cfg(feature, values("debug"))',
 ]

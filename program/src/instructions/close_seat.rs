@@ -25,16 +25,18 @@ use crate::{
 ///
 /// # Safety
 ///
-/// Caller guarantees the safety contract detailed in
+/// Caller upholds the safety contract detailed in
 /// [`dropset_interface::instructions::generated_program::CloseSeat`].
 #[inline(never)]
-pub fn process_close_seat<'a>(
+pub unsafe fn process_close_seat<'a>(
     accounts: &'a [AccountView],
     instruction_data: &[u8],
     event_buffer: &mut EventBuffer,
 ) -> Result<EventBufferContext<'a>, ProgramError> {
     let sector_index_hint =
         CloseSeatInstructionData::unpack_untagged(instruction_data)?.sector_index_hint;
+
+    // Safety: No account data in `accounts` is currently borrowed.
     let mut ctx = unsafe { CloseSeatContext::load(accounts) }?;
 
     // Remove the seat after copying the market bump and the seat's base and quote available.
